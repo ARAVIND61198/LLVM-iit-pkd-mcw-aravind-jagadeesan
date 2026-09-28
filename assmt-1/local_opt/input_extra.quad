@@ -1,0 +1,21 @@
+# Extra tests: commutativity + array references
+#
+# Commutativity: x = a * b and y = b * a are the same value.
+# Arrays: two identical loads A[t1] are a CSE; a store to A kills the cache.
+
+# --- commutativity ---
+x = a * b
+y = b * a          # same as x  (commutative)
+p = m + n
+q = n + m          # same as p  (commutative)
+
+# --- array references (from the PDF CFG example) ---
+i = 0
+t1 = 4 * i
+t3 = A[t1]
+t5 = A[t1]         # same as t3  (redundant load, CSE)
+t6 = t3 * t5
+
+# store kills cached load, so the next load is NOT redundant
+A[t1] = t6
+t7 = A[t1]         # must be recomputed (not deleted)

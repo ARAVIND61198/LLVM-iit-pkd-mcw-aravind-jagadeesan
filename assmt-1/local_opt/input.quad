@@ -1,0 +1,18 @@
+# PDF example (Local Value Numbering)
+# HLL:
+#   a = 10
+#   b = 4 * a
+#   c = i * j + b
+#   d = 15 * a * c
+#   e = i
+#   c = e * j + i * a
+a = 10
+b = 4 * a
+t1 = i * j
+c = t1 + b
+t2 = 15 * a
+d = t2 * c
+e = i
+t3 = e * j
+t4 = i * a
+c = t3 + t4
