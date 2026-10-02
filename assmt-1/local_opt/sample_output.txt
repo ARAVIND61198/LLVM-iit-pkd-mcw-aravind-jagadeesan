@@ -1,0 +1,47 @@
+===== PDF example (input.quad) =====
+=== Optimized quadruples (annotated) ===
+1. a = 10
+2. b = 40   // constant
+3. t1 = i * j
+4. c = t1 + 40
+5. t2 = 150   // deleted constant
+6. d = 150 * c
+7. e = i
+8. t3 = i * j   // deleted same as t1
+9. t4 = i * 10
+10. c = t1 + t4
+
+=== Final quadruples (renumbered) ===
+1. a = 10
+2. b = 40
+3. t1 = i * j
+4. c = t1 + 40
+5. d = 150 * c
+6. e = i
+7. t4 = i * 10
+8. c = t1 + t4
+
+===== Extra (input_extra.quad) =====
+=== Optimized quadruples (annotated) ===
+1. x = a * b
+2. y = b * a   // same as x
+3. p = m + n
+4. q = n + m   // same as p
+5. i = 0
+6. t1 = 0   // deleted constant
+7. t3 = A[0]
+8. t5 = A[0]   // deleted same as t3 (redundant array load)
+9. t6 = t3 * t3
+10. A[0] = t6
+11. t7 = A[0]
+
+=== Final quadruples (renumbered) ===
+1. x = a * b
+2. y = b * a
+3. p = m + n
+4. q = n + m
+5. i = 0
+6. t3 = A[0]
+7. t6 = t3 * t3
+8. A[0] = t6
+9. t7 = A[0]

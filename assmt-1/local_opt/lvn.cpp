@@ -1,21 +1,3 @@
-// Local Value Numbering (LVN)
-// Standalone tool: reads quadruples, emits optimized quadruples.
-//
-// Supported optimizations within a single basic block:
-//   * Constant folding
-//   * Constant propagation
-//   * Copy propagation
-//   * Common Subexpression Elimination (CSE)
-//   * Commutativity handling (a op b == b op a for + and *)
-//   * Array reference handling (x = arr[idx], arr[idx] = x)
-//
-// Input quadruple syntax (one per line, '#' or '//' start a comment line):
-//   dst = value                 ; constant / copy   (e.g. a = 10 , e = i)
-//   dst = op1 <op> op2          ; binary            (e.g. t1 = i * j)
-//   dst = arr[idx]              ; array load        (e.g. t3 = t2[t1])
-//   arr[idx] = src              ; array store       (e.g. t2[t1] = x)
-// where <op> is one of + - * /
-
 #include <cctype>
 #include <cstdint>
 #include <fstream>
@@ -25,25 +7,18 @@
 #include <string>
 #include <vector>
 
-//===----------------------------------------------------------------------===//
-// Data structures for value numbering
-//===----------------------------------------------------------------------===//
-
-// NameTable entry, indexed by value number.
 struct NameTableEntry {
-  std::vector<std::string> names; // all names sharing this value number
-  long constValue = 0;            // constant value (if constFlag)
-  bool constFlag = false;         // true if this value is a known constant
+  std::vector<std::string> names;
+  long constValue = 0;
+  bool constFlag = false;
 };
 
-// The three tables of the classic LVN algorithm.
-static std::map<std::string, int> ValnumTable; // name        -> value number
-static std::map<std::string, int> HashTable;   // canonical expr -> value number
-static std::vector<NameTableEntry> NameTable;  // value number -> entry
+static std::map<std::string, int> ValnumTable;
+static std::map<std::string, int> HashTable;
+static std::vector<NameTableEntry> NameTable;
 
 static int NextValueNumber = 0;
 
-// Allocate a fresh value number with an (optional) initial name.
 static int newValueNumber(const std::string &name = "") {
   int vn = NextValueNumber++;
   NameTable.emplace_back();
@@ -51,10 +26,6 @@ static int newValueNumber(const std::string &name = "") {
     NameTable[vn].names.push_back(name);
   return vn;
 }
-
-//===----------------------------------------------------------------------===//
-// Small helpers
-//===----------------------------------------------------------------------===//
 
 static std::string trim(const std::string &s) {
   size_t b = s.find_first_not_of(" \t\r\n");
@@ -79,9 +50,6 @@ static bool isIntLiteral(const std::string &s, long &out) {
   return true;
 }
 
-// A name is treated as a compiler temporary if it starts with 't' followed by
-// digits (e.g. t1, t23).  Temporaries that become constants or CSE duplicates
-// are eligible for deletion.
 static bool isTemp(const std::string &name) {
   if (name.size() < 2 || name[0] != 't')
     return false;
@@ -91,27 +59,19 @@ static bool isTemp(const std::string &name) {
   return true;
 }
 
-// Representative (first) name of a value number.
 static std::string repName(int vn) {
   if (vn >= 0 && vn < (int)NameTable.size() && !NameTable[vn].names.empty())
     return NameTable[vn].names.front();
   return "?";
 }
 
-//===----------------------------------------------------------------------===//
-// Operand resolution
-//===----------------------------------------------------------------------===//
-
-// An operand resolves either to a known constant, or to a value number.
 struct Operand {
   bool isConst = false;
   long constValue = 0;
   int vn = -1;
-  std::string origText; // as written in the source quad
+  std::string origText;
 };
 
-// Resolve a textual operand: literal -> constant; existing name -> its vn
-// (and its constant, if any); unseen name -> fresh value number.
 static Operand resolveOperand(const std::string &tok) {
   Operand op;
   op.origText = tok;
@@ -137,14 +97,12 @@ static Operand resolveOperand(const std::string &tok) {
   return op;
 }
 
-// How an operand should be printed after propagation.
 static std::string printOperand(const Operand &op) {
   if (op.isConst)
     return std::to_string(op.constValue);
   return repName(op.vn);
 }
 
-// Canonical hash-key token for an operand (value-number based).
 static std::string keyToken(const Operand &op) {
   if (op.isConst)
     return "c" + std::to_string(op.constValue);
@@ -167,19 +125,14 @@ static bool foldConst(char op, long a, long b, long &out) {
   return false;
 }
 
-//===----------------------------------------------------------------------===//
-// Output record for each processed quadruple
-//===----------------------------------------------------------------------===//
-
 struct OutQuad {
-  std::string text;    // optimized quadruple text
-  bool deleted = false;// true if it can be removed
-  std::string note;    // annotation (e.g. "same as t1", "constant")
+  std::string text;
+  bool deleted = false;
+  std::string note;
 };
 
 static std::vector<OutQuad> Output;
 
-// Assign / merge a name to a value number in the tables.
 static void setNameVN(const std::string &name, int vn) {
   ValnumTable[name] = vn;
   auto &names = NameTable[vn].names;
@@ -196,11 +149,6 @@ static void makeConst(const std::string &name, int vn, long value) {
   setNameVN(name, vn);
 }
 
-//===----------------------------------------------------------------------===//
-// Core processing of one quadruple
-//===----------------------------------------------------------------------===//
-
-// Parse "arr[idx]" into (arr, idx).  Returns false if not an array ref.
 static bool parseArrayRef(const std::string &s, std::string &arr,
                           std::string &idx) {
   size_t lb = s.find('[');
@@ -212,7 +160,6 @@ static bool parseArrayRef(const std::string &s, std::string &arr,
   return !arr.empty() && !idx.empty();
 }
 
-// Invalidate cached loads for an array (on a store to that array).
 static void killArrayLoads(const std::string &arrToken) {
   for (auto it = HashTable.begin(); it != HashTable.end();) {
     if (it->first.rfind(arrToken + "[", 0) == 0)
@@ -225,18 +172,16 @@ static void killArrayLoads(const std::string &arrToken) {
 static void processQuad(const std::string &line) {
   size_t eq = line.find('=');
   if (eq == std::string::npos)
-    return; // ignore malformed lines
+    return;
 
   std::string lhs = trim(line.substr(0, eq));
   std::string rhs = trim(line.substr(eq + 1));
 
-  //--- Array store:  arr[idx] = src ------------------------------------------
   std::string arr, idx;
   if (parseArrayRef(lhs, arr, idx)) {
     Operand base = resolveOperand(arr);
     Operand index = resolveOperand(idx);
     Operand src = resolveOperand(rhs);
-    // A store invalidates previously cached loads of this array.
     killArrayLoads("A" + keyToken(base));
     OutQuad q;
     q.text = arr + "[" + printOperand(index) + "] = " + printOperand(src);
@@ -244,7 +189,6 @@ static void processQuad(const std::string &line) {
     return;
   }
 
-  //--- Array load:  dst = arr[idx] -------------------------------------------
   if (parseArrayRef(rhs, arr, idx)) {
     Operand base = resolveOperand(arr);
     Operand index = resolveOperand(idx);
@@ -266,14 +210,12 @@ static void processQuad(const std::string &line) {
     return;
   }
 
-  //--- Tokenize RHS to detect binary vs copy/constant ------------------------
   std::istringstream iss(rhs);
   std::vector<std::string> toks;
   std::string t;
   while (iss >> t)
     toks.push_back(t);
 
-  //--- Binary op:  dst = op1 <op> op2 ----------------------------------------
   if (toks.size() == 3 && toks[1].size() == 1 &&
       (toks[1][0] == '+' || toks[1][0] == '-' || toks[1][0] == '*' ||
        toks[1][0] == '/')) {
@@ -281,7 +223,6 @@ static void processQuad(const std::string &line) {
     Operand a = resolveOperand(toks[0]);
     Operand b = resolveOperand(toks[2]);
 
-    // Constant folding.
     long folded;
     if (a.isConst && b.isConst && foldConst(op, a.constValue, b.constValue,
                                             folded)) {
@@ -290,14 +231,11 @@ static void processQuad(const std::string &line) {
       OutQuad q;
       q.text = lhs + " = " + std::to_string(folded);
       q.note = "constant";
-      // A temporary that only holds a constant can be deleted (its uses are
-      // propagated).
       q.deleted = isTemp(lhs);
       Output.push_back(q);
       return;
     }
 
-    // Build canonical key (commutativity: order operand tokens).
     std::string ka = keyToken(a), kb = keyToken(b);
     std::string key;
     if (isCommutative(op) && kb < ka)
@@ -310,7 +248,6 @@ static void processQuad(const std::string &line) {
 
     auto hit = HashTable.find(key);
     if (hit != HashTable.end()) {
-      // CSE: reuse the existing value number.
       int vn = hit->second;
       setNameVN(lhs, vn);
       q.deleted = isTemp(lhs);
@@ -324,7 +261,6 @@ static void processQuad(const std::string &line) {
     return;
   }
 
-  //--- Copy or constant:  dst = value ----------------------------------------
   if (toks.size() == 1) {
     long lit;
     if (isIntLiteral(toks[0], lit)) {
@@ -335,7 +271,6 @@ static void processQuad(const std::string &line) {
       Output.push_back(q);
       return;
     }
-    // Copy: dst = src  -> copy propagation (dst gets src's value number).
     Operand src = resolveOperand(toks[0]);
     setNameVN(lhs, src.vn);
     OutQuad q;
@@ -344,15 +279,10 @@ static void processQuad(const std::string &line) {
     return;
   }
 
-  // Fallback: emit unchanged.
   OutQuad q;
   q.text = line;
   Output.push_back(q);
 }
-
-//===----------------------------------------------------------------------===//
-// Driver
-//===----------------------------------------------------------------------===//
 
 int main(int argc, char **argv) {
   std::istream *in = &std::cin;
@@ -368,7 +298,6 @@ int main(int argc, char **argv) {
 
   std::string line;
   while (std::getline(*in, line)) {
-    // Strip inline comments ('#' or '//').
     size_t hash = line.find('#');
     if (hash != std::string::npos)
       line = line.substr(0, hash);
@@ -381,7 +310,6 @@ int main(int argc, char **argv) {
     processQuad(s);
   }
 
-  // Print annotated optimized quadruples.
   std::cout << "=== Optimized quadruples (annotated) ===\n";
   int idx = 1;
   for (auto &q : Output) {
@@ -393,7 +321,6 @@ int main(int argc, char **argv) {
     std::cout << "\n";
   }
 
-  // Print final renumbered quadruples (deleted quads removed).
   std::cout << "\n=== Final quadruples (renumbered) ===\n";
   int n = 1;
   for (auto &q : Output)
