@@ -1,0 +1,14 @@
+--- !Missed
+Pass:            loop-interchange
+Name:            UnsupportedPHIInner
+Function:        matmul
+Args:
+  - String:          Only inner loops with induction or reduction PHI nodes can be interchange currently.
+...
+--- !Passed
+Pass:            loop-interchange
+Name:            Interchanged
+Function:        interchange_demo
+Args:
+  - String:          Loop interchanged with enclosing loop.
+...

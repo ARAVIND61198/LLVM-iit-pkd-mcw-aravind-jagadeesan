@@ -1,0 +1,18 @@
+Loop optimization benchmark
+Fri Oct  2 09:28:39 AM MDT 2026
+
+Matrix multiply  N=128  BLK=32  (4.19 MFLOP/run)
+  kernel             time(ms)   GFLOP/s   speedup    check
+  ------------------------------------------------------------
+  naive                 1.735      2.42     1.00x    ref
+  interchange           0.567      7.40     3.06x    OK
+  tiled                 0.463      9.05     3.75x    OK
+  tiled+unroll          0.635      6.60     2.73x    OK
+
+Matrix multiply  N=512  BLK=64  (268.44 MFLOP/run)
+  kernel             time(ms)   GFLOP/s   speedup    check
+  ------------------------------------------------------------
+  naive               434.143      0.62     1.00x    ref
+  interchange          37.193      7.22    11.67x    OK
+  tiled                24.867     10.80    17.46x    OK
+  tiled+unroll         38.233      7.02    11.36x    OK
